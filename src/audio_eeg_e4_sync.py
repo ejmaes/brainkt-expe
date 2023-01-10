@@ -70,14 +70,19 @@ def get_audio_trig(vaudio:np.array, mark:pd.Series, fs:float,
         swindow = int(win_side*fs) # 1s window if win_side = 0.5
         wsr = audio_trigger - swindow
         wst = audio_trigger + swindow
+        shorta = vaudio[:,wsr:wst]
         # ----- locate in signal (won't work if too noisy)
         ts = np.array(range(wsr,wst))/fs
-        adf = pd.DataFrame(vaudio[:,wsr:wst].T, index=ts, columns=['cam1','cam2'])
+        if (trig == 'End Task 2') and (ts.shape[0] != shorta.shape[1]): # if video is cut during trig
+            pad = np.zeros((2, ts.shape[0] - shorta.shape[1]))
+            shorta = np.concatenate([shorta, pad], axis=1)
+
+        adf = pd.DataFrame(shorta.T, index=ts, columns=['cam1','cam2'])
         try: # scale - use the same scaling for all 3 markers
             check_is_fitted(sc['cam1'])
         except: # NotFittedError
-            sc['cam1'].fit(vaudio[0,wsr:wst].reshape(-1, 1))
-            sc['cam2'].fit(vaudio[1,wsr:wst].reshape(-1, 1))
+            sc['cam1'].fit(shorta[0].reshape(-1, 1))
+            sc['cam2'].fit(shorta[1].reshape(-1, 1))
         # scale
         adf['cam1'] = sc['cam1'].transform(adf['cam1'].to_numpy().reshape(-1, 1))
         adf['cam2'] = sc['cam2'].transform(adf['cam2'].to_numpy().reshape(-1, 1))

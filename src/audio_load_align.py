@@ -190,12 +190,13 @@ def visual_check(vaudio_align, raudio_align, boundaries:tuple, fs:int):
 
 # **Checking whether signal disaligns**:
 # We need to check whether there is a point at which the difference between the two signals becomes stronger
-def monitor_alignment(vaudio_align:np.array, raudio_align:np.array, fs:int, audio_clap:float=None, plot_figure:bool=False, **kwargs):
+def monitor_alignment(vaudio_align:np.array, raudio_align:np.array, fs:int, audio_clap:float=None, 
+                plot_figure:bool=False, **kwargs):
     """Check every 10s (-ish) the alignment
     """
     df = {'ts':[], 'val':[]}
     rs = fs if audio_clap is None else int((np.round(audio_clap%1, decimals=3)+1)*fs)
-    r = range(rs, vaudio_align.shape[1], 10*fs) # jump every 10 seconds - df won't be aligned
+    r = range(rs, vaudio_align.shape[1]-fs, 10*fs) # jump every 10 seconds until 1s before end - df won't be aligned
     for m_clap in r:
         swindow = int(0.5*fs)
         wstart = m_clap - swindow
@@ -250,8 +251,8 @@ if __name__ == '__main__':
             # 2. Compute delay and align
             vaudio_align, raudio_align, (wsr,wst), vdiff = align_audios(vaudio, raudio, mark.Clap, fs=vfs)
             cam_delay[vfolder] = vdiff
-            # 3. Compute drift and delay
-            df = monitor_alignment(vaudio_align, raudio_align, vfs, mark['Clap']).reset_index(drop=False)
+            # 3. Compute drift and delay - nframes = 10 is a minimum 
+            df = monitor_alignment(vaudio_align, raudio_align, vfs, mark['Clap'], n_frames=10).reset_index(drop=False)
             df['src'] = vfolder
             drift.append(df)
             
