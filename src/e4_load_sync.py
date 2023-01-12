@@ -2,10 +2,12 @@ import numpy as np
 import pandas as pd
 import datetime
 import os, sys, shutil
+import json
 
 e4_path = "../data/empatica/"
 
 #%% ---------- Load
+#### Original Files
 # https://stackoverflow.com/questions/3451111/unzipping-files-in-python
 def read_one_watch_data(watch_path, remove_once_complete:bool=True, tags_as_datetime:bool=True):
     """Reading data from Emotiv Files:
@@ -60,6 +62,45 @@ def _aggregate_one_watch(one_watch_data:dict, unaligned:bool=True) -> pd.DataFra
     return df.reset_index(), min_ts
 
 
+
+##### Adapted Files
+def export_retimed_e4(watch:pd.DataFrame, path:str, split_files:bool=False):
+    if path[-4:] not in ['json', '.csv']:
+        raise ValueError("Extension must be one of .json (sparse encoding), .csv (all data with na values)")
+    split_files = (path[-4:] == 'json')
+    # Save
+    if not split_files:
+        watch.to_csv(path, index=False)
+    else:
+        # write every column in a different "file", dropping NA
+        signals = {}
+        for bio in ['HR','TEMP','BVP','EDA']:
+            signals[bio] = watch.dropna(subset=bio).set_index('time_from_vstart')[bio].to_dict()
+        # ACC has 3 columns (x,y,z)
+        signals['ACC'] = watch.dropna(subset=['ACC_1']).set_index('time_from_vstart')[[
+            col for col in watch.columns if 'ACC' in col]].apply(lambda x: tuple(x), axis=1).to_dict()
+        with open(path, 'w') as f:
+            json.dump(signals, f, indent=4)
+
+def read_retimed_e4(path:str, split_files:bool=False, pandasiokwargs:dict=None) -> pd.DataFrame:
+    if not split_files:
+        watch = pd.read_csv(path, **pandasiokwargs)
+    else:
+        with open(path, 'r') as f:
+            signals = json.load(f)
+        watch = []
+        for bio in ['HR','TEMP','BVP','EDA']:
+            watch.append(pd.Series(signals[bio], name=bio))
+        acc = pd.DataFrame(signals['ACC']).T
+        acc.columns = [f'ACC_{i}' for i in range(3)]
+        watch.append(acc)
+        watch = pd.concat(watch, axis=1, ignore_index=False).sort_index().reset_index(drop=False)
+        watch.rename(columns={'index':'time_from_vstart'}, inplace=True)
+        watch.time_from_vstart = watch.time_from_vstart.apply(lambda x: np.round(float(x), decimals=7))
+    return watch
+
+
+
 #%% ----------- Triggers
 # Select trigger for alignment, if more than 1
 def select_trig(p1:list, p2:list, ref_time=None, compute_min:bool=True):
@@ -90,6 +131,26 @@ def select_trig(p1:list, p2:list, ref_time=None, compute_min:bool=True):
         return comp
     m = comp.sort_values(['diff','time_to_ref']).iloc[0]
     return m.t1, m.t2
+
+#### Synchronise to video using triggers
+def retime_watches_from_vid(part:int, watch:dict, wtrig:float, mark:pd.Series) -> pd.DataFrame:
+    """Align the trigger to the video trigger to compute file start / end
+    """
+    awatch, min_ts = _aggregate_one_watch(watch)
+
+    # if trigger is datetime
+    #awatch['time_abs'] = awatch.time.apply(lambda x: datetime.datetime.fromtimestamp(min_ts))
+    #awatch['time_abs'] = awatch.time.apply(lambda x: x.replace(tzinfo=datetime.timezone.utc)) # if need timezone
+    #awatch['time_abs'] = awatch.time.apply(lambda x: x + datetime.timedelta(seconds=x))
+    awatch['time_abs'] = awatch.time + min_ts
+    # Locate trigger
+    trig_time = awatch[(awatch.time_abs >= wtrig)].iloc[0].time
+    # Trigger corresponds to mark['Watch pX']
+    awatch['time_from_vstart'] = awatch.time - trig_time + mark[f'Watch p{part}']
+    # return based on that
+    retimed_watch = awatch[(awatch['time_from_vstart'] > 0) & (awatch['time_from_vstart'] <= mark.Stop)].reset_index(drop=True)
+    return retimed_watch[[col for col in retimed_watch.columns if col not in ['time','time_abs']]]
+
 
 
 #%% ---- OLD - rename watches
@@ -125,3 +186,24 @@ def rename_wfiles(sessions:pd.DataFrame, watches:dict = {"A037FA":"p2", "A03CEF"
             f_pattern = f"{date}_{s_name}"
             os.rename(folder, os.path.join(e4_path, f_pattern))
             #print(f, f_pattern, "\n") # controls
+
+#%% ---- Plot
+def plot_one_watch(timed_watch, mark:pd.Series, which_cols:list=['HR', 'TEMP','EDA']):
+    if isinstance(timed_watch, pd.DataFrame):
+        timed_watch = [timed_watch]
+    tws = [twi.set_index('time_from_vstart') for twi in timed_watch]
+    fig, ax = plt.subplots(nrows=len(which_cols), figsize=(14, 4*len(which_cols)))
+    for i, col in enumerate(which_cols):
+        ymin = ymax = []
+        for p, tw in enumerate(tws):
+            tw[col].dropna().plot(ax=ax[i], label=f"{col}_p{p+1}")
+            ymin.append(tw[col].min())
+            ymax.append(tw[col].max())
+        ymin = min(ymin)
+        ymax = max(ymax)
+        print(ymin, ymax)
+        ax[i].legend(loc='upper right')
+    
+    for c in ['Clap', 'Start Task 1', 'End Task 1', 'End Task 2']:
+        for i in range(len(ax)):
+            ax[i].axvline(x=mark[c], ymin=ymin, ymax=ymax, color='red')

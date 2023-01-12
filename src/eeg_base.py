@@ -43,7 +43,7 @@ def drop_ch_rules(ch_name:str) -> bool:
     return False
 
 # Keep only unique markers
-def drop_markers(data, stim_channel:str='Status', repeat_window:float=5., replace_value:int=0):
+def drop_markers(data, stim_channel:str='Status', repeat_window:float=5., trig_duration:float=.2, replace_value:int=0):
     """Locate markers that are within a window of the previous marker and drop them.
     """
     # 1. Locate markers
@@ -56,11 +56,20 @@ def drop_markers(data, stim_channel:str='Status', repeat_window:float=5., replac
     print("Dropping markers at index: ", set(markers_idx.idx.tolist()) - set(keep_markers))
     # 2. Replace markers
     for i in keep_markers:
-        event_start = i + int(0.2*sfreq)
+        event_start = i + int(trig_duration*sfreq)
         event_end = event_start + int(repeat_window*sfreq)
-        data['Status',event_start:event_end] = replace_value
+        data[stim_channel,event_start:event_end] = replace_value
     # Inplace, no return
     return keep_markers
+
+def add_markers(data, trigger_time:float, stim_channel:str='Status', trig_duration:float=.2, replace_value:int=1):
+    """If need arise to add trigger in EEG - after padding for instance
+    """
+    sfreq = data.info['sfreq']
+    event_start = int(trigger_time*sfreq)
+    event_end = event_start + int(trig_duration*sfreq)
+    data[stim_channel,event_start:event_end] = replace_value
+    # done inplace, no need to return
 
 #%% ---------- Loading
 def _load_eeg(eeg_path:str, date:str, group:str, preload_eeg:bool=True, **kwargs):
@@ -142,7 +151,8 @@ def trim_or_pad_eeg(data, dpt:dict, video_duration:float):
 
 #%% ---------- Splitting and Writing
 def eeg_split_files(data, part_names:list, data_path:str=None, 
-                montage=mne.channels.make_standard_montage('biosemi64'), print_colnames:bool=False):
+                montage=mne.channels.make_standard_montage('biosemi64'), print_colnames:bool=False,
+                overwrite:bool=False):
     """Split into one file for each participant - Rename electrodes with montage name
     """
     files = {}
@@ -160,7 +170,9 @@ def eeg_split_files(data, part_names:list, data_path:str=None,
     
     if data_path is not None:
         for k,v in files.items():
-            v.save(f"{data_path}-{k}-raw.fif") # creating new path
+            path = f"{data_path}-{k}-raw.fif"
+            if not(os.path.exists(path)) or overwrite:
+                v.save(path, overwrite=True) # creating new path
             # mne.export.export_raw('../data/test.edf', test) - format: edf, brainvision, eeglab
             # naming conventions, should finish with raw.fif or _eeg.fif.gz or ...
     else:
