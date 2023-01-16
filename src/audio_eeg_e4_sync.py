@@ -14,6 +14,8 @@ import matplotlib.pyplot as plt
 import IPython
 
 import scipy.signal as sig 
+from scipy.signal import butter, lfilter
+from scipy.signal import freqz
 import mne
 
 import scipy.signal as sig 
@@ -60,12 +62,164 @@ def load_data(date:str, group:str, **kwargs):
 
 
 
+
 #%% ---------- Triggers
+# Audio signal Filters for Trigger location
+def butter_bandpass(lowcut, highcut, fs, order=5):
+    return butter(order, [lowcut, highcut], fs=fs, btype='band')
+
+def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
+    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = lfilter(b, a, data)
+    return y
+
+def take_closest_to_mark(df, col:str, thres:float, trig_time:float, trig_win:float=0.2) -> float:
+    """Select the timestamp that's above a threshold and closest to the video timestamp (if later), or earliest (if anterior)
+    """
+    if col is None: # col is None for series => dataframe
+        col = 'values'
+        df = pd.DataFrame(df)
+        df.columns = [col]
+    df['above_thres'] = df[col].abs() > thres
+    df['above_start'] = (df['above_thres']) * (df['above_thres'] != df['above_thres'].shift()) # detect new sections above threshold
+    df['time_from_vtrig'] = np.abs(df.index - trig_time) 
+    # remove locations furthest from trig_time
+    #sel = df[df['above_thres']].index # v0
+    #sel = df[df['above_thres'] & ((df.index - trig_time).abs() <= trig_win)].index # v1
+    #sel = df[df['above_start'] & df['time_from_vtrig']].index # v2
+    sel = df[df['above_start'] & (df['time_from_vtrig'] <= trig_win)].sort_values('time_from_vtrig').index # v3
+    if len(sel) > 0:
+        return sel.tolist()[0]
+    return None
+
 # Get audio triggers from signal 
 def get_audio_trig(vaudio:np.array, mark:pd.Series, fs:float, 
-                    spec_nfft:int=64, spec_target_fq:float=0.12500, win_side:float=0.5,
+                    spec_nfft:int=64, spec_target_fq:float=0.12500, win_side:float=0.5, win_filter:float=300.,
+                    scaler = skp.MinMaxScaler(feature_range=(-1,1)), 
+                    add_durations:bool=True, return_all_values:bool=False, **kwargs) -> pd.DataFrame:
+    """For each marker, locate the trigger. Location for several methods of detection are returned (if one fails another one might be used).
+
+    Selection: 
+    * Audio soundwave - removed
+    * Audio spectrogram - both channels
+    * Audio spectrogram - convoluted channels (removing noise that's only one channel)
+
+    Soundwave is scaled between [-1,1]; spectrogram is scaled between [0,1] (minmax scaler). 
+    Soundwave is scaled based on the 1rst trigger; spectrogram isn't (relative to itself)
+
+    Markers:
+    * 'Start Task 1': precedeed only by silence. Is used to fit the scaler (so that all 3 soundwaves fit into [-1,1])
+    * 'End Task 1': chatter might be simultaneous. Using bandpass filter to select frequencies around trigger frequency. Then scaling.
+    * 'End Task 2': may need to be padded if the video is cut short. Same as 'End Task 1'
+    """
+    sound_thres = 0.8
+    spec_thres = 40 #0.4
+    # filter: lowcut / highcut values are 
+    trig_fq = 2793.825851464031 # Hz, F7 on a keyboard
+    lowcut = trig_fq - win_filter
+    highcut = trig_fq + win_filter
+    # main function
+    window_signals = {'audio':[], 'spectrogram':[]}
+    audio_trig = []
+    sc = { 'cam1': clone(scaler), 'cam2': clone(scaler) }
+    for trig in ['Start Task 1','End Task 1','End Task 2']:
+        at = {'marker': trig, 'video_time': mark[trig]}
+        # parameters
+        audio_trigger = int(mark[trig]*fs)
+        swindow = int(win_side*fs) # 1s window if win_side = 0.5
+        wsr = audio_trigger - swindow
+        wst = audio_trigger + swindow
+        shorta = vaudio[:,wsr:wst]
+        # filtering
+        shorta[0,:] = butter_bandpass_filter(shorta[0,:], lowcut, highcut, fs, order=6)
+        shorta[1,:] = butter_bandpass_filter(shorta[1,:], lowcut, highcut, fs, order=6)
+        # ----- locate in signal (won't work if too noisy)
+        ts = np.array(range(wsr,wst))/fs
+        if (trig == 'End Task 2') and (ts.shape[0] != shorta.shape[1]): # if video is cut during trig
+            pad = np.zeros((2, ts.shape[0] - shorta.shape[1]))
+            shorta = np.concatenate([shorta, pad], axis=1)
+
+        adf = pd.DataFrame(shorta.T, index=ts, columns=['cam1','cam2'])
+        try: # scale - use the same scaling for all 3 markers
+            check_is_fitted(sc['cam1'])
+        except: # NotFittedError
+            sc['cam1'].fit(shorta[0].reshape(-1, 1))
+            sc['cam2'].fit(shorta[1].reshape(-1, 1))
+        # scale
+        adf['cam1'] = sc['cam1'].transform(adf['cam1'].to_numpy().reshape(-1, 1))
+        adf['cam2'] = sc['cam2'].transform(adf['cam2'].to_numpy().reshape(-1, 1))
+        # Removed because often noise before / sometimes trig starts far from marker
+        at['p1-sig_time'] = take_closest_to_mark(adf, 'cam1', sound_thres, mark[trig])
+        at['p2-sig_time'] = take_closest_to_mark(adf, 'cam2', sound_thres, mark[trig])
+        # ----- locate in spectrogram
+        spec_sig = {}
+        for ch in [1,2]:
+            # parameters for spectrogram: nfft = nperseg = 64 => target frequency = 0.125000
+            # also issues if scaling not applied
+            f, t, Sxx = sig.spectrogram(adf[f'cam{ch}'], nfft = spec_nfft, nperseg=spec_nfft) # vaudio[ch,wsr:wst]
+            trig_spec = pd.DataFrame(Sxx, index=f, columns=(t+wsr)/fs)
+            snd = trig_spec.loc[spec_target_fq].T 
+            # scale (0-1) - and recreate Series
+            #snd = pd.Series(skp.MinMaxScaler(feature_range=(0,1)).fit_transform(snd.to_numpy().reshape(-1, 1)).T[0], index=snd.index)
+            spec_sig[f'p{ch}-spec_time'] = snd
+            sndd = snd.diff().shift(-1) # Adding diffs but will not be used
+            spec_sig[f'p{ch}-spec_time_diff'] = sndd
+            at[f'p{ch}-spec_time'] = take_closest_to_mark(snd, None, spec_thres, mark[trig])
+        # compute using both spectrometers - flatten where one speaks, cap the trig at 1
+        spec_sig = pd.DataFrame(spec_sig)
+        spec_sig['marker'] = trig
+        spec_sig['video_time'] = mark[trig]
+        spec_sig['cross-spec_time'] = spec_sig['p1-spec_time'] * spec_sig['p2-spec_time']
+        #spec_sig['cross-spec_time'] = (spec_sig['p1-spec_time'] + spec_sig['p2-spec_time'])/2
+        #spec_sig['cross-spec_time'] = skp.MinMaxScaler().fit_transform(spec_sig['cross-spec_time'].to_numpy().reshape(-1, 1))
+        at[f'cross-spec_time'] = take_closest_to_mark(spec_sig, 'cross-spec_time', spec_thres, mark[trig])
+        # save data
+        adf['marker'] = trig
+        adf['video_time'] = mark[trig]
+        window_signals['audio'].append(adf)
+        window_signals['spectrogram'].append(spec_sig)
+        # add triggers to list
+        audio_trig.append(at)
+        # ----- XXX: check that audio in the signal doesn't affect (for instance, looking for _periods_ above a threshold)
+
+    audio_trig = pd.DataFrame(audio_trig).set_index('marker')
+    # Booleans
+    if add_durations:
+        # differences in measurements
+        #audio_trig['st-diff'] = audio_trig['p1-sig_time'] - audio_trig['p2-sig_time']
+        #audio_trig['sp-diff'] = audio_trig['p1-spec_time'] - audio_trig['p2-spec_time']
+        # tasks durations
+        durations = pd.concat([audio_trig.loc['End Task 1'] - audio_trig.loc['Start Task 1'], 
+            audio_trig.loc['End Task 2'] - audio_trig.loc['End Task 1']], axis=1).T
+        durations.index = ['Task 1', 'Task 2']
+        #durations.loc[:,['st-diff','sp-diff']] = np.nan
+        #durations.loc[:,['sp-diff']] = np.nan
+        # concatenate
+        audio_trig = pd.concat([audio_trig, durations], axis=0)
+    # Plots: must be one outside of the function, with the best selected trigger
+    # Returns
+    if return_all_values:
+        window_signals = {k:pd.concat(v, axis=0).reset_index(drop=False) for k,v in window_signals.items()}
+        return audio_trig, window_signals
+    return audio_trig
+
+"""
+# ----- Previous version -----
+def take_closest_to_mark(df:pd.DataFrame, col:str, thres:float, trig_time:float,) -> float:
+    #Select the timestamp that's above a threshold and closest to the video timestamp (if later), or earliest (if anterior)
+    sel = df[df[col] > thres].index
+    sel - trig_time
+
+# Get audio triggers from signal 
+def get_audio_trig(vaudio:np.array, mark:pd.Series, fs:float, 
+                    spec_nfft:int=64, spec_target_fq:float=0.12500, win_side:float=0.5, win_filter:float=300.,
                     scaler = skp.MinMaxScaler(feature_range=(-1,1)),
                     add_durations:bool=True, return_all_values:bool=False) -> pd.DataFrame:
+    # filter: lowcut / highcut values are 
+    trig_fq = 2793.825851464031 # Hz, F7 on a keyboard
+    lowcut = trig_fq - win_filter
+    highcut = trig_fq + win_filter
+    # main function
     window_signals = {'audio':[], 'spectrogram':[]}
     audio_trig = []
     sc = { 'cam1': clone(scaler), 'cam2': clone(scaler) }
@@ -145,6 +299,7 @@ def get_audio_trig(vaudio:np.array, mark:pd.Series, fs:float,
         window_signals = {k:pd.concat(v, axis=0).reset_index(drop=False) for k,v in window_signals.items()}
         return audio_trig, window_signals
     return audio_trig
+"""
 
 
 # Compare EEG and Audio
@@ -224,11 +379,11 @@ def plot_audio_trig(vaudio:np.array, fs:float, audio_trigger:float, win_side:flo
 
 
 #%% Main Pipeline
-load_watches = True
-overwrite_eeg = True
+load_watches = False
+overwrite_eeg = False
 # vfolders can be changed depending on needs - which files have been writen already
-#vfolders = [vfolder for vfolder in sorted(os.listdir(video_path)) if os.path.isdir(os.path.join(video_path, vfolder))]
-vfolders = ['221123_MMCM', '221130_AMLB']#, '221128_EMTR', '221206_MMER']
+vfolders = [vfolder for vfolder in sorted(os.listdir(video_path)) if os.path.isdir(os.path.join(video_path, vfolder))]
+#vfolders = ['221123_MMCM', '221130_AMLB']#, '221128_EMTR', '221206_MMER']
 sync_verbose = '../data/data_sync.csv'
 
 if __name__ == '__main__':
@@ -254,6 +409,7 @@ if __name__ == '__main__':
 
             # 2. Pad and trim EEG
             ndata = trim_or_pad_eeg(data, dpt, mark.loc['Stop'])
+            del data
             if add_trigger_in_pad:
                 add_markers(ndata, trigger_time=audio_trig.loc['Start Task 1', best_col_align])
             # 3. Save split EEG
