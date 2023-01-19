@@ -1,0 +1,215 @@
+# Préparer pour le lancement de l'expérience
+
+* Si besoin, ranger la régie et la chambre sourde.
+* Allumer la multiprise et l'ordinateur de la régie : `tpinfo`, mdp : `LPL2015$`
+* Allumer le RME
+    * Vérifier **ON** sur la face arrière du RME
+* Sur la fenêtre de mixage : "Mic 1" sur "Out 1" et "Mic 2" sur "Out 2"
+* Lancer Audacity :
+    * Windows Wasapi;
+    * Analog (1+2) (RME Fireface UC) ;
+    * 2 canaux d'enregistrement;
+    * Analog (7+8) (RME FireFace UC) ;
+    * Fichier > enregistrer projet sous > BrainKT > audio > P?_P? rme.
+* Allumer les caméras, d'abord F11 puis F12 ;
+    * Vérifier la synchronisation des caméras (même horodatage) ;
+    * Vérifier la présence des cartes mémoire (en haut de l'écran) et qu'on enregistre sur le slot A (petit triangle)
+* Allumer les éclairages :
+    * Vérifier la puissance (20% sur le grand, max sur les deux petits)
+    * Vérifier la température sur les caméras (bas droite) : 5400-5000k.
+* Préparer des verres et une carafe d'eau.
+* Préparer **l'ordinateur de jeu** :
+    * S'il n'est pas allumé, l'allumer : `administrateur`, mdp `LPL2015$`
+    * Lancer Steam (cliquer sur mode hors ligne si pas d'internet, sinon sortir de la chambre sourde)
+    * Lancer Keep Talking and Nobody Explodes (icône sur le Bureau)
+    * Passer les menus initiaux (accepter l'utilisation des mods mais ne rien modifier)
+    * Sur le menu principal, cliquer sur le classeur
+    * **Rebrancher l'ordinateur** en revenant dans la chambre sourde
+* Créer la session FindingFive pour la journée
+
+# Vérifications soirs 
+* Recharger : 
+    * Brancher les batteries biosemi
+    * Brancher les montres.
+* Récupérer les données : 
+    * 3 sources : Ordinateur RME, Ordinateur EEG, Cartes Caméras
+    * Copie sur `Filer > Agora > Transition > bkt-tmp`
+    * Copie sur le disque dur.
+* Ranger les consentements dans le trieur.
+* Ranger les casques dans le placard.
+
+
+\pagebreak
+# Préparer la salle pour les participants suivants
+
+* Lancer le chauffage pour que la pièce ne soit pas trop froide pendant les enregistrements.
+* Envoyer un SMS de rappel au participants suivants
+* Vérifier le niveau de batterie **biosemi/montres**
+* Vérifier les **stocks** (gels, cotton, gomettes, scotch, alcool, shampoing, serviettes)
+* Préparation pour l'installation des casques :
+    * 4 seringues
+    * 6 scotchs (EXG)
+    * 2 cotons
+    * 2 feuilles de sopalin
+
+
+# Installation des participants 
+
+
+Consignes générales (de manière générale expliciter tout) :
+
+* Lors de l'arrivée des participants, faire la visite (douches, chambre sourde, etc)
+* Proposer de passer aux toilettes avant l'installation
+* Demander confirmation de l'adresse mail pour envoyer le lien FindingFive.
+* Faire poser le téléphone en silencieux dans la régie.
+* Donner la 1ère page de consignes aux participants
+* Répartition des rôles (ordinateur / manuel)
+    * Si un participant connait le jeu, lui donner l'ordinateur
+    * Rappeler l'interdiction de montrer la ressource à l'autre participant, y compris pendant la tâche
+
+**Pour l'expert** :
+
+* Donner le manuel
+* Laisser 30s pour compiler le manuel. Il n'a pas besoin de connaitre les informations en détail, juste comprendre l'organisation et savoir où aller chercher les informations
+* Reprendre le manuel au bout de 30s
+
+**Pour le désamorceur** :
+
+* Donner la deuxième page de consignes
+* Indiquer qu'il aura les tutoriels à réaliser une fois installé dans la chambre sourde
+
+\pagebreak
+
+## Installation EEG
+
+* Tour de tête et sélection du bon casque.
+* Faire retirer boucles d'oreilles, chewing-gum etc..
+* Références:
+    * Nettoyer à l'alcool sous l'œil gauche et derrière les deux oreilles.
+    * Coller la gommette ;
+    * Mettre le gel ;
+    * Enlever le cache ;
+    * Poser et maintenir avec du scotch.
+* Mettre le micro serre-tête aux participants, bien serrer.
+    * Vérifier que le micro est bien à droite 
+    * Vérifier que sous la bonnette, le micro est bien orienté vers la bouche.
+    * Vérifier que le micro ne gêne pas sur le dessus des oreilles.
+* Poser le bonnet : 
+    * F (Frontal) devant. CMS, DRL derrière et centrer grossièrement.
+    * Mesurer entre le nasion et l'inion, centrer Cz entre les deux.
+    * Mesurer entre les points préauriculaires, centrer Cz entre les deux.
+    * Attacher le casque - Proposer de mettre un coton entre la lanière et le menton pour que ça ne serre / rape pas trop
+
+![](./part1.png){width=40%} 
+![](./part2.png){width=40%}
+![](./nas-inion.png){width=40%}
+
+* Meltre le gel : 
+    * Ecarter les cheveux, appuyer et sortir la seringue en même temps. 
+    * En cas de doute, appuyer pour voir si du gel sort.
+* Mettre les électrodes, les orienter vers PAG-Box du participant (P1 côté micro, P2
+côté référence sous l'oeil)
+
+\pagebreak
+
+## Installation dans la chambre sourde
+
+* Placer les participants dans la chambre sourde : **P1 au fond, P2 coté porte**.
+* Proposer de l'eau avant de commencer.
+* Branchements : 
+    * Brancher les micros.
+    * Brancher l'EEG.
+    * Allumer l'Ad-Box.
+    * Vérifier le signal (DMS/CLS ok)
+* Dans LabView :
+    * Start file ; Boîte de dialogue -› OK ;
+    * Enregistrer le fichier dans le dossier BrainKT, nom : "P?-P? smyle" (e.g. : P4-P5 smyle):
+    * Sélection sur la gauche channel A+B pour Ad-Box 1 et Ad-Box 2 ;
+        * Faire cligner des yeux aux participants, filmer avec le téléphone et leur montrer le signal ;
+    * Vérifier l'impédance:
+        * Onglet Offset (3e onglet)
+        * Channel A+B ;
+        * 50Uv :
+        * Si une électrode dépasse 20 et -20 : Remettre du gel pour les électrodes qui posent problème
+    * Revenir sur la vue Monopolar
+* Dans Audacity :
+    * Réglage du gain : faire réciter les jours de la semaine
+    * Lancer un enregistrement et ajuster le gain pour que le signal soit assez fort mais qu'il ne sature pas ;
+* Mettre les montres (et Biopac si disponible).
+* **Déplacer la table** entre les deux participants (ordinateur pour le participant 1 - au fond)
+* Faire réaliser au participant 1 le **tutoriel sur l'ordinateur**
+    * Sur le menu principal, cliquer sur classeur, puis faire faire les deux premiers tutoriels
+    * Une fois les tutoriels finis, revenir sur le menu principal, cliquer sur la tablette > DMG 
+* Redonner le **manuel au participant 2**
+* Climatisation/chauffage OFF.
+
+![](./ktane-menu.png){width=40%} 
+![](./ktane-filer.png){width=40%}
+![](./ktane-tablet.png){width=40%}
+
+\pagebreak
+
+# Lancement expérience
+
+Lancement des enregistrements
+
+* Rappel consigne : l'expérience va bientôt commencer, demander aux participants s'ils se souviennent bien de leur tâche.
+* Expliquer le **déroulement**:
+    * Ils pourront commencer une fois qu'ils entendront le signal sonore.
+        * Le désamorceur pourra cliquer sur `Run`
+    * Au niveau du temps :
+        * Ils peuvent se regarder le chronomètre de la bombe pour savoir depuis combien de temps ils ont commencé
+        * S'ils ne s'arrêtent pas d'eux-mêmes, ils entendront au bout d'un certain temps le signal sonore (de préférence entre deux modules, sauf s'ils bloquent sur un module)
+    * Une fois la première tâche finie, mettre l'ordinateur de côté (veille) sans fermer le jeu
+    * Il y aura une pause
+    * On relancera l'enregistrement et ils pourront commencer la conversation libre pendant 15 minutes en commençant par le dilemme
+    * Une fois la seconde tâche finie, ils seront déséquippés, puis ils rempliront les questionnaires
+* Lancer l'enregistrement des caméras,
+* Lancer l'enregistrement de l'audio.
+* Lancer les montres en les montrant à la caméra + appuyer une fois (diode clignote rouge) sur la montre pour la synchro
+* Réaliser le clap audio-video
+* Fermer la porte.
+* Lancer l'enregistrement EEG 
+    * Cliquer sur START/PAUSE (au dessous de NOT SAVING)
+    * SAVING en vert veut dire que ça ENREGISTRE.
+* Lancer le trigger.
+* Envoyer les liens FindingFive par mail
+
+
+## Entre les deux tâches
+
+* Relancer un trigger avant d'entrer.
+* Proposer de l'eau.
+* Proposer une relecture du dilemme
+* Refaire un trigger.
+
+\pagebreak
+
+## Fin d'expérience
+
+* Lancer un trigger.
+* Arrêter les caméras, audacity, montres, EEG.
+    * Montre : 2s d'appui, ne doit pas clignoter vert à nouveau (reset)
+    * Sauvegarder le projet Audacity et exporter en wav > BrainKT > P? P? audio
+* Sur l'ordinateur :
+    * Keep Talking est normalement encore ouvert
+    * Noter le nombre de strikes (X*)
+    * Noter le nombre de modules réussis (diode verte allumée) et quels modules sont réussis
+    * Revenir sur le menu principal
+* Déplacer la table pour la remettre sur le côté.
+* Déséquiper les participants.
+    * Les amener tour à tour à la salle de bain se laver les cheveux.
+    * Donner les téléphones aux participants
+    * Faire remplir les questionnaires FindingFive:
+        * Ouvrir le lien envoyé par mail ;
+        * "Don't have an account ? Create one"
+            * Connexion avec Google ou Microsoft ;
+            * Register as : Participant :
+        * Faire ouvrir le formulaire de consentement:
+        * Cliquer sur "Participate" :
+        * Aller en bas de la page : "Enroll Now"
+        * Accepter les termes FindingFive;
+        * "Begin the study"
+    * Les raccompagner jusqu'au portail.
+* Laver les casques et électrodes.
+
