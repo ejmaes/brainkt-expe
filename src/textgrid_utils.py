@@ -40,6 +40,7 @@ def read_tier(tg_path:str, tier_name:typing.Union[list,str]=None) -> pd.DataFram
         tier_name = [tg[0].name]
     elif isinstance(tier_name,str):
         tier_name = [tier_name]
+    # else isinstance(tier_name,list)
     # read from tier
     dialogs = []
     for tname in tier_name:

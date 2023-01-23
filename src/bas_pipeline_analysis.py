@@ -31,9 +31,10 @@ curl -v -X POST -H 'content-type: multipart/form-data' -F com=yes -F INSKANTEXTG
 
 import requests
 import xml.etree.ElementTree as ET
-import ffmpeg
+import ffmpeg # ffmpeg vs ffmpeg-python: both are imported with 'ffmpeg' but not the same commands
 import os
 import json
+import subprocess
 
 from textgrid_utils import read_tier, write_tier
 
@@ -62,13 +63,23 @@ class AlignTranscription():
     def _compress_audio(self) -> None:
         """Compress audio and replace self.audio_path
         """
-        input = ffmpeg.input(self.audio_path)
+        audio_path_init = self.audio_path
         self.audio_path = os.path.splitext(self.audio_path) # splitting
         self.audio_path = f"{self.audio_path[0]}-compressed{self.audio_path[1]}"
-        ffmpeg.output(input.audio, self.audio_path,
-                # extra arguments as kwargs, such as        
-                #**{'c:v': 'libx264', 'b:v': video_bitrate, 'pass': 2, 'c:a': 'aac', 'b:a': audio_bitrate}
-            ).overwrite_output().run()
+        try:
+            input = ffmpeg.input(audio_path_init)
+            ffmpeg.output(input.audio, self.audio_path,
+                    # extra arguments as kwargs, such as        
+                    #**{'c:v': 'libx264', 'b:v': video_bitrate, 'pass': 2, 'c:a': 'aac', 'b:a': audio_bitrate}
+                ).overwrite_output().run()
+        except AttributeError: # module 'ffmpeg' has no attribute 'input' because wrong module is loaded
+            print("ffmpeg is loaded instead of ffmpeg-python. uninstall ffmpeg and reinstall ffmpeg-python")
+            ffmpeg_call = ["ffmpeg", "-i", audio_path_init, self.audio_path]
+            # call
+            subprocess.call(ffmpeg_call, 
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.STDOUT)
+        
 
     def _curl_pipeline(self, notification_email:str=None, **kwargs) -> None:
         """Query BAS Pipeline with object audio/transcription. If error, returns query response; 
