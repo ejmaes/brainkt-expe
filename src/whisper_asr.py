@@ -57,7 +57,7 @@ import numpy as np
 import pandas as pd
 import audiofile
 from tqdm import tqdm
-import datetime
+from datetime import datetime
 from glob import glob
 import textgrid
 import shutil
@@ -132,6 +132,8 @@ class AudioFileDataset(torch.utils.data.Dataset):
         # to tensor + resample
         self.or_audio = self.audio
         self.audio = resample_audio(self.audio, self.fs, target_fq, device=self.device)
+        self.or_fs = self.fs
+        self.fs = target_fq
 
     def _searchipus(self):
         """For each channel, locate IPUs using SPPAS. 
@@ -139,7 +141,7 @@ class AudioFileDataset(torch.utils.data.Dataset):
         2. read from those files then delete them
         """
         # SPPAS - activate
-        spass_log=f"searchipus-{datetime.datetime.now().strftime('%y%m%d-%H:%M:%S')}-{self.filepath}"
+        spass_log=f"searchipus-{datetime.now().strftime('%y%m%d-%H:%M:%S')}-{self.filepath}"
         actions = ['searchipus']
         parameters = sppasParam([f"{x}.json" for x in actions])
         for x in actions:
@@ -174,7 +176,7 @@ class AudioFileDataset(torch.utils.data.Dataset):
             for t in tg[0]:
                 if t.mark not in ["#",""]: # check that
                     ipus_bounds.append({
-                        'channel': c, 'start': t.minTime, 'stop': t.maxTime,
+                        'channel': c, 'start': t.minTime, 'stop': t.maxTime, 'text': 'ipu'
                     })
             # Files - cleanup sound and textgrid
             if self.cleanup_onechannel:
@@ -239,96 +241,100 @@ def predict_extract(model, audio, s_start:float=0., s_stop:float=300., channel:i
 
 
 
-# ## Writing to TextGrid
-t3.to_csv("~/Downloads/tmp/bkt-pilot-221103-agg-medium.csv", index=False)
-t3 = pd.read_csv("~/Downloads/tmp/bkt-pilot-221103-agg-medium.csv")
-
-
-
 #%% ------ Arguments
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument("filepath", type=str, required=True, help="File to Transcribe")
-    parser.add_argument("--model_size", '-m', choice=['base','tiny','medium','small','large'], default="medium", help="Which whisper model to use")
+    parser.add_argument("filepath", type=str, help="File/Folder to Transcribe")
+    parser.add_argument("--model_size", '-m', choices=['base','tiny','medium','small','large'], default="medium", help="Which whisper model to use")
     parser.add_argument("--use_ipus", '-ipus', action="store_true", help="Whether to run model.transcribe() (default) or on ipus (results not as good)")
     parser.add_argument("--save_res_csv", '-csv', action="store_true", help="Whether to save model predictions as csv")
     parser.add_argument("--do_bas_alignment", '-a', action="store_true", help="Whether to do BAS alignment")
     parser.add_argument("--language", '-l', type=str, default='fra-FR', help="Language option for BAS.")
     
     args = parser.parse_args()
-    if not os.path.exists(args.file_path):
+    if not os.path.exists(args.filepath):
         raise ValueError("File does not exist")
+    elif not os.path.isdir(args.filepath):
+        args.filepath = [args.filepath]
+    else: # filter so that only audio files are selected
+        args.filepath = [os.path.join(args.filepath, x) for x in sorted(os.listdir(args.filepath)) if os.path.splitext(x)[-1] == '.wav']
 
     return args
 
 #%% ------ Main
 if __name__ == '__main__':
     args = parse_arguments()
-    start = datetime.now()
 
-    dataset = AudioFileDataset(args.filepath)
-    model = whisper.load_model(args.model_size)
-    options = whisper.DecodingOptions(language=args.language.lower()[:2], without_timestamps=False, fp16 = False)
+    for filepath in args.filepath:
+        print(f"\n---- Transcribing file {filepath}")
+        algo_start = datetime.now().timestamp()
+        dataset = AudioFileDataset(filepath)
+        model = whisper.load_model(args.model_size)
+        options = whisper.DecodingOptions(language=args.language.lower()[:2], without_timestamps=False, fp16 = False)
 
-    if args.use_ipus:
-        # use long ipus - worse result with short
-        dataset.set_dataset("long")
-        loader = torch.utils.data.DataLoader(dataset, batch_size=16)
-        md_transcr = {'start':[], 'stop':[], 'speaker':[], 'text': []}
-        for start, stop, channel, mels in tqdm(loader):
-            results = model.decode(mels, options)
-            # /!\ batches
-            for k,v in zip(['start','stop','speaker','text'],[start, stop, channel, [result.text for result in results]]):
-                if not isinstance(v,list):
-                    v = v.tolist()
-                md_transcr[k].extend(v)
-        md_transcr = pd.DataFrame(md_transcr)
+        if args.use_ipus:
+            # use long ipus - worse result with short
+            dataset.set_dataset("long")
+            loader = torch.utils.data.DataLoader(dataset, batch_size=16)
+            md_transcr = {'start':[], 'stop':[], 'speaker':[], 'text': []}
+            for start, stop, channel, mels in tqdm(loader):
+                results = model.decode(mels, options)
+                # /!\ batches
+                for k,v in zip(['start','stop','speaker','text'],[start, stop, channel, [result.text for result in results]]):
+                    if not isinstance(v,list):
+                        v = v.tolist()
+                    md_transcr[k].extend(v)
+            md_transcr = pd.DataFrame(md_transcr)
 
-    else:
-        # Run using whisper.transcribe()
-        md_transcr = []
-        for speaker in range(dataset.audio.shape[0]):
-            result = model.transcribe(dataset.audio[speaker,:], fp16=False)
-            tmp = pd.DataFrame(result["segments"])
-            tmp['speaker'] = speaker
-            md_transcr.append(tmp)
-        md_transcr = pd.concat(md_transcr, axis=0).sort_values('start').reset_index(drop=True).rename(columns={'end':'stop'})
+        else:
+            # Run using whisper.transcribe()
+            md_transcr = []
+            for speaker in range(dataset.audio.shape[0]):
+                result = model.transcribe(dataset.audio[speaker,:], fp16=False)
+                tmp = pd.DataFrame(result["segments"])
+                tmp['speaker'] = speaker
+                md_transcr.append(tmp)
+            md_transcr = pd.concat(md_transcr, axis=0).sort_values('start').reset_index(drop=True).rename(columns={'end':'stop'})
 
-    if args.save_res_csv:
-        fn = os.path.join(dataset.save_folder, f"{dataset.filename[:-4]}-{'transcr' if not args.use_ipus else 'ipus'}-{args.model_size}.csv")
-        md_transcr.to_csv(fn, index=False)
+        print(f"Transcription duration: {np.round(algo_start - datetime.now().timestamp(),3)}s")
 
-    audios = {os.path.join(dataset.save_folder, f"{dataset.filename[:-4]}_mono_{speaker}.wav") for speaker in dataset.nb_channels}
-    textgrids = {os.path.join(dataset.save_folder, f"{dataset.filename[:-4]}_mono_{speaker}.TextGrid") for speaker in dataset.nb_channels}
-    # save as TextGrid
-    for speaker in range(dataset.nb_channels):
-        # saving in different files to test alignment
-        df = md_transcr[md_transcr.speaker == speaker]
-        df.start = df.start.apply(lambda x: np.round(x,2))
-        df.stop = df.stop.apply(lambda x: np.round(x,2)) # issues if no rounding
-        overlaps = ((df['start'] - df['stop'].shift()).dropna() < 0)
-        print('nb overlaps:', overlaps.sum())
-        write_tier(df, file_name=textgrids[speaker], 
-                annot_tier=f'spk{speaker}', text_column='text', timestart_col='start', timestop_col='stop',
-                file_duration=dataset.audio_duration)
+        if args.save_res_csv:
+            fn = os.path.join(dataset.save_folder, f"{dataset.filename[:-4]}-{'transcr' if not args.use_ipus else 'ipus'}-{args.model_size}.csv")
+            md_transcr.to_csv(fn, index=False)
 
-    if args.do_bas_alignment:
+        audios = {speaker: os.path.join(dataset.save_folder, f"{dataset.filename[:-4]}_mono_{speaker}.wav") for speaker in range(dataset.nb_channels)}
+        textgrids = {speaker: os.path.join(dataset.save_folder, f"{dataset.filename[:-4]}_mono_{speaker}.TextGrid") for speaker in range(dataset.nb_channels)}
+        # save as TextGrid
         for speaker in range(dataset.nb_channels):
-            ns_path = audios[speaker]
-            ts_path = textgrids[speaker]
-            at = AlignTranscription(audio_path=ns_path, transcription_path=ts_path, 
-                transcription_tier="spk{speaker}", lg=args.language)
-            at.run_pipeline(compress=True)
+            # saving in different files to test alignment
+            df = md_transcr[md_transcr.speaker == speaker]
+            df.start = df.start.apply(lambda x: np.round(x,2))
+            df.stop = df.stop.apply(lambda x: np.round(x,2)) # issues if no rounding
+            overlaps = ((df['start'] - df['stop'].shift()).dropna() < 0)
+            print('nb overlaps:', overlaps.sum())
+            write_tier(df, file_name=textgrids[speaker], 
+                    annot_tier=f'spk{speaker}', text_column='text', timestart_col='start', timestop_col='stop',
+                    file_duration=dataset.audio_duration)
 
-            # parse bas into ipus
-            outfile = at.aligned_transcription.replace('bas','bas-ipus')
-            # read file
-            words = read_tier(at.aligned_transcription, tier_name="ORT-MAU")
-            # create ipus - columns start, stop
-            words['pause_duration'] = (words['start'] - words['stop'].shift()).fillna(0.) > 0.3
-            words['ipu_id'] = words['pause_duration'].cumsum()
-            ipus = words.groupby('ipu_id').agg({
-                'start': 'min', 'stop': 'max', 'text': lambda x: ' '.join(list(x))
-            })
-            # write ipus
-            write_tier(ipus, outfile)
+        if args.do_bas_alignment:
+            for speaker in range(dataset.nb_channels):
+                ns_path = audios[speaker]
+                ts_path = textgrids[speaker]
+                at = AlignTranscription(audio_path=ns_path, transcription_path=ts_path, 
+                    transcription_tier=f"spk{speaker}", lg=args.language)
+                at.run_pipeline(compress=True)
+
+                # parse bas into ipus
+                outfile = at.aligned_transcription.replace('bas','bas-ipus')
+                # read file
+                words = read_tier(at.aligned_transcription, tier_name="ORT-MAU")
+                # create ipus - columns start, stop
+                words['pause_duration'] = (words['start'] - words['stop'].shift()).fillna(0.) > 0.3
+                words['ipu_id'] = words['pause_duration'].cumsum()
+                ipus = words.groupby('ipu_id').agg({
+                    'start': 'min', 'stop': 'max', 'text': lambda x: ' '.join(list(x))
+                })
+                # write ipus
+                write_tier(ipus, outfile)
+
+        print(f"Total duration for file: {np.round(algo_start - datetime.now().timestamp(),3)}s")

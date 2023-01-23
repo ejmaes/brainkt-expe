@@ -76,6 +76,7 @@ def write_tier(df:pd.DataFrame, file_name:str,
     # Check if there are no ipus overlapping themselves
     overlaps = ((df[timestart_col] - df[timestop_col].shift()).dropna() < 0).sum()
     if overlaps > 0:
+        print(df[((df[timestart_col] - df[timestop_col].shift()).dropna() < 0)])
         raise IndexError("Overlaps between several speakers exist in this DataFrame.")
     # Add silence rows in DataFrame
     stops = df[timestart_col].iloc[1:].tolist()
@@ -89,6 +90,7 @@ def write_tier(df:pd.DataFrame, file_name:str,
         print(df[timestop_col].iloc[-1])
     df_sil = pd.DataFrame({timestart_col: starts, timestop_col: stops})
     df_sil[text_col] = "#"
+    df_sil = df_sil[df_sil[timestart_col] != df_sil[timestop_col]] # don't add void cells
     df = pd.concat([df, df_sil], axis=0).sort_values(by=[timestart_col]).reset_index(drop=True)
     # Create / Read file
     if os.path.exists(file_name):

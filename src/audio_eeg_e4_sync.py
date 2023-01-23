@@ -156,6 +156,7 @@ def get_audio_trig(vaudio:np.array, mark:pd.Series, fs:float,
         for ch in [1,2]:
             # parameters for spectrogram: nfft = nperseg = 64 => target frequency = 0.125000
             # also issues if scaling not applied
+            # not adding fs in spectropgram => 0-1 must be transformed to actual range
             f, t, Sxx = sig.spectrogram(adf[f'cam{ch}'], nfft = spec_nfft, nperseg=spec_nfft) # vaudio[ch,wsr:wst]
             trig_spec = pd.DataFrame(Sxx, index=f, columns=(t+wsr)/fs)
             snd = trig_spec.loc[spec_target_fq].T 
