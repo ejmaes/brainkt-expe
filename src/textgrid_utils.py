@@ -74,9 +74,11 @@ def write_tier(df:pd.DataFrame, file_name:str,
         elif (annot_tier in tg_tiers):
             print('Tier exists. Changing tier name.')
     # Check if there are no ipus overlapping themselves
-    overlaps = ((df[timestart_col] - df[timestop_col].shift()).dropna() < 0).sum()
-    if overlaps > 0:
-        print(df[((df[timestart_col] - df[timestop_col].shift()).dropna() < 0)])
+    overlaps = ((df[timestart_col] - df[timestop_col].shift()).fillna(1.) < 0)
+    if overlaps.sum() > 0:
+        print(df[overlaps][[timestart_col, timestop_col, text_col]])
+        for idx, _ in df[overlaps].iterrows():
+            print(df.loc[idx-2:idx+2,[timestart_col, timestop_col, text_col]])
         raise IndexError("Overlaps between several speakers exist in this DataFrame.")
     # Add silence rows in DataFrame
     stops = df[timestart_col].iloc[1:].tolist()
@@ -84,7 +86,7 @@ def write_tier(df:pd.DataFrame, file_name:str,
     if df[timestart_col].iloc[0] > 0:
         stops = [df[timestart_col].iloc[0]] + stops
         starts = [0.0] + starts 
-    if file_duration is not None:
+    if (file_duration is not None) and (file_duration > stops[-1]):
         stops.append(file_duration)
         starts.append(df[timestop_col].iloc[-1])
         print(df[timestop_col].iloc[-1])
