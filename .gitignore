@@ -1,3 +1,9 @@
-./data/*
-./doc/*.docx
+data/video/22*
+data/transcript
+data/audio*
+data/eeg*
+data/empatica*
+data/ff5
+data/fixe_projects
+doc/*.docx
 *.DS_Store

@@ -30,11 +30,18 @@ from e4_load_sync import read_one_watch_data, select_trig, export_retimed_e4, re
 video_path = "../data/video"
 aaudio_folder = "../data/audio-aligned"
 eeg_folder = "../data/eeg"
-aeeg_folder = "../data/eeg-aligned"
+aeeg_folder = "../data/eeg-aligned-x"
 e4_folder = "../data/empatica"
 ae4_folder = "../data/empatica-aligned"
 markers_path = "../data/video/markers_from_video_start.csv"
 markers = pd.read_csv(markers_path)
+
+manual_start_values = {
+#    '221205_KMJF': [23.1958,986.2938,1975.959],
+#    '221206_MMER': [50.71541950113379,1025.805,1941.3719274376415],
+#    '221207_SLCB': [95.1448,1066.289387755102,2021.1558],
+    '221123_MMCM': [71.4128,947.8816,1956.15]
+}
 
 #%% ---------- Loading
 def load_data(date:str, group:str, **kwargs):
@@ -93,7 +100,7 @@ def take_closest_to_mark(df, col:str, thres:float, trig_time:float, trig_win:flo
     return None
 
 # Get audio triggers from signal 
-def get_audio_trig(vaudio:np.array, mark:pd.Series, fs:float, 
+def get_audio_trig_v2(vaudio:np.array, mark:pd.Series, fs:float, 
                     spec_nfft:int=64, spec_target_fq:float=0.12500, win_side:float=0.5, win_filter:float=300.,
                     scaler = skp.MinMaxScaler(feature_range=(-1,1)), 
                     add_durations:bool=True, return_all_values:bool=False, **kwargs) -> pd.DataFrame:
@@ -204,18 +211,21 @@ def get_audio_trig(vaudio:np.array, mark:pd.Series, fs:float,
         return audio_trig, window_signals
     return audio_trig
 
-"""
 # ----- Previous version -----
+"""
 def take_closest_to_mark(df:pd.DataFrame, col:str, thres:float, trig_time:float,) -> float:
     #Select the timestamp that's above a threshold and closest to the video timestamp (if later), or earliest (if anterior)
     sel = df[df[col] > thres].index
     sel - trig_time
+"""
 
 # Get audio triggers from signal 
-def get_audio_trig(vaudio:np.array, mark:pd.Series, fs:float, 
+def get_audio_trig_v1(vaudio:np.array, mark:pd.Series, fs:float, 
                     spec_nfft:int=64, spec_target_fq:float=0.12500, win_side:float=0.5, win_filter:float=300.,
                     scaler = skp.MinMaxScaler(feature_range=(-1,1)),
                     add_durations:bool=True, return_all_values:bool=False) -> pd.DataFrame:
+    """Simpler version. No filter to remove chatter.
+    """
     # filter: lowcut / highcut values are 
     trig_fq = 2793.825851464031 # Hz, F7 on a keyboard
     lowcut = trig_fq - win_filter
@@ -300,7 +310,6 @@ def get_audio_trig(vaudio:np.array, mark:pd.Series, fs:float,
         window_signals = {k:pd.concat(v, axis=0).reset_index(drop=False) for k,v in window_signals.items()}
         return audio_trig, window_signals
     return audio_trig
-"""
 
 
 # Compare EEG and Audio
@@ -342,14 +351,18 @@ def check_all_durations(audio_trig:pd.DataFrame, eeg_markers:list, eeg_sfreq:int
         return eeg_durations, dpt_all
     return eeg_durations, None
 
-def get_best_align(audio_trig:pd.DataFrame, eeg_markers:list, eeg_sfreq:int, precision:float, **kwargs):
+def precision_to_power(precision:float) -> float:
+    return 10 ** math.ceil(math.log10(precision))
+
+def get_best_align(audio_trig:pd.DataFrame, eeg_markers:list, eeg_sfreq:int, precision:float, prec_to_power:bool=True, **kwargs):
     eeg_durations, dpt_all = check_all_durations(audio_trig, eeg_markers, eeg_sfreq, precision=precision, **kwargs) # already sorted
     if dpt_all is None:
         raise ValueError(f"No matching could be computed for this file with precision {precision}")
     col = dpt_all.index[0]
     precision = dpt_all.iloc[0][['dt1','dt2']].max()
-    precision = 10 ** math.ceil(math.log10(precision))
-    return col, precision, eeg_durations, check_durations(audio_trig[col], eeg_markers, eeg_sfreq, precision, **kwargs) # return dpt
+    if prec_to_power:   
+        precision = precision_to_power(precision)
+    return col, precision, eeg_durations, check_durations(audio_trig[col], eeg_markers, eeg_sfreq, precision, **kwargs), audio_trig[col] # return dpt and trigger locations in audio
 
 #%% ---------- Plot functions
 def plot_audio_trig(vaudio:np.array, fs:float, audio_trigger:float, win_side:float=0.5, # audio signal
@@ -381,11 +394,11 @@ def plot_audio_trig(vaudio:np.array, fs:float, audio_trigger:float, win_side:flo
 
 #%% Main Pipeline
 load_watches = False
-overwrite_eeg = False
+overwrite_eeg = True
 # vfolders can be changed depending on needs - which files have been writen already
 vfolders = [vfolder for vfolder in sorted(os.listdir(video_path)) if os.path.isdir(os.path.join(video_path, vfolder))]
-#vfolders = ['221123_MMCM', '221130_AMLB']#, '221128_EMTR', '221206_MMER']
-sync_verbose = '../data/data_sync.csv'
+vfolders = list(manual_start_values.keys())#['221207_SALT', '221201_LIVS']#, '221128_EMTR', '221206_MMER']
+sync_verbose = '../data/data_sync_fuse.csv'
 
 if __name__ == '__main__':
     # For each file
@@ -403,16 +416,53 @@ if __name__ == '__main__':
             vfolder_data = mark.to_dict() # copy data
 
             # 1. Loop on audio - compute best alignment and precision
-            # Only using aligned video audio
-            #for f, audio in zip(['video','rme'], [vaudio, raudio]):
-            audio_trig = get_audio_trig(vaudio, mark, vfs)
-            best_col_align, precision, eeg_durations, dpt = get_best_align(audio_trig, markers_idx, data.info['sfreq'], precision=1e2)
+            # 1.5 if trigger locations have been computed manually, then load them instead of computing them.
+            if vfolder not in manual_start_values:
+                # Only using aligned video audio, but using two methods to check which is most accurate
+                #for f, audio in zip(['video','rme'], [vaudio, raudio]):
+                # Using first method
+                eeg_res = {}
+                try:
+                    audio_trig = get_audio_trig_v1(vaudio, mark, vfs)
+                    eeg_res[1] = get_best_align(audio_trig, markers_idx, data.info['sfreq'], precision=1e2, prec_to_power=False)
+                except:
+                    eeg_res[1] = [None, 1000, None, None]
+                # Using second method
+                try:
+                    audio_trig = get_audio_trig_v2(vaudio, mark, vfs)
+                    eeg_res[2] = get_best_align(audio_trig, markers_idx, data.info['sfreq'], precision=1e2, prec_to_power=False)
+                except:
+                    eeg_res[2] = [None, 1000, None, None]
+                # Selecting best EEG alignment
+                if eeg_res[1][1] == eeg_res[2][1]:
+                    method = "both"
+                    best_col_align, precision, eeg_durations, dpt, audio_trig_sel = eeg_res[1]
+                else:
+                    method = np.argmin([eeg_res[1][1], eeg_res[2][1]]) + 1
+                    best_col_align, precision, eeg_durations, dpt, audio_trig_sel = eeg_res[method]
+                precision = precision_to_power(precision)
+            else:
+                audio_trig_sel = pd.Series(manual_start_values[vfolder], index=['Start Task 1', 'End Task 1', 'End Task 2'], name='manual')
+                audio_trig_sel['Task 1'] = audio_trig_sel['End Task 1'] - audio_trig_sel['Start Task 1']
+                audio_trig_sel['Task 2'] = audio_trig_sel['End Task 2'] - audio_trig_sel['End Task 1']
+                best_col_align = 'manual'
+                method = 'manual'
+                eeg_durations =  {
+                    'task1': (markers_idx[1] - markers_idx[0])/data.info['sfreq'],
+                    'task2': (markers_idx[2] - markers_idx[1])/data.info['sfreq']
+                }
+                dpt = check_durations(audio_trig_sel, markers_idx, data.info['sfreq'], precision=1e2)
+                dt1 = (abs(eeg_durations['task1'] - audio_trig_sel.loc['Task 1']))
+                dt2 = (abs(eeg_durations['task2'] - audio_trig_sel.loc['Task 2']))
+                precision = precision_to_power((dt1+dt2)/2)
+                
 
             # 2. Pad and trim EEG
             ndata = trim_or_pad_eeg(data, dpt, mark.loc['Stop'])
             del data
             if add_trigger_in_pad:
-                add_markers(ndata, trigger_time=audio_trig.loc['Start Task 1', best_col_align])
+                trig_time = audio_trig_sel.loc['Start Task 1'] if (vfolder in manual_start_values) else audio_trig_sel.loc['Start Task 1', best_col_align]
+                add_markers(ndata, trigger_time=trig_time)
             # 3. Save split EEG
             p_order = signal_quality[(signal_quality.Date == int(date)) & (signal_quality.Dyad == group)].sort_values('AdBox').Participant.tolist()
             eeg_split_files(ndata, p_order, data_path=os.path.join(aeeg_folder, f"bkt-{date}-{group}"), overwrite=overwrite_eeg)
@@ -447,7 +497,12 @@ if __name__ == '__main__':
                 'EEG Task1 Duration': eeg_durations['task1'],
                 'EEG Task2 Duration': eeg_durations['task2'],
                 'EEG PadOrTrim': dpt['pad_or_trim'],
-                'EEG Pad Duration': dpt['duration']
+                'EEG Pad Duration': dpt['duration'],
+                'Align Method': method,
+                'Audio Detailed ST1': audio_trig_sel['Start Task 1'],
+                'Audio Detailed ET1': audio_trig_sel['End Task 1'],
+                'Audio Detailed ET2': audio_trig_sel['End Task 2'],
+                'Comments':''
             })
             eeg_e4_align[vfolder] = vfolder_data 
                 
@@ -461,6 +516,6 @@ if __name__ == '__main__':
     eeg_e4_align = pd.DataFrame(eeg_e4_align).T
     if os.path.exists(sync_verbose):
         # Load and append
-        prev_data = pd.read_csv(sync_verbose)
+        prev_data = pd.read_csv(sync_verbose, index_col=0)
         eeg_e4_align = pd.concat([prev_data, eeg_e4_align], axis=0)
     eeg_e4_align.to_csv(sync_verbose, index=True)
