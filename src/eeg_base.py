@@ -71,6 +71,40 @@ def add_markers(data, trigger_time:float, stim_channel:str='Status', trig_durati
     data[stim_channel,event_start:event_end] = replace_value
     # done inplace, no need to return
 
+# Adding external triggers / annotations for analysis (IPU ends, etc)
+def add_eeg_triggers(data, times:list, stim_channel:str='IPUs', replace_value:int=1):
+    """Add a different channel for stim to allow for simultaneous stimuli"""
+    info = mne.create_info([stim_channel], data.info['sfreq'], ['stim'])
+    stim_data = np.zeros((1, len(data.times)))
+    stim_data[:,[int(x*data.info['sfreq']) for x in times]] = replace_value
+    stim_raw = mne.io.RawArray(stim_data, info)
+    data.add_channels([stim_raw], force_update_info=True)
+
+def add_annotations(data, df_dict:dict, start_col:str='start', stop_col:str='stop', meas_date=None, replace_annot:bool=False):
+    """All dataframes will be processed at once - annotation key is dict key, df must be read from textgrid tier (start,stop)
+    for instance, df_dict = {'listen': df_p2, 'speak': df_p1}
+    """
+    starts = []
+    durs = []
+    keys = []
+    has_annot = len(data.annotations) > 0
+    has_dt_annot = has_annot and (data.annotations.to_data_frame().onset.dtype != float)
+    if has_dt_annot and (meas_date is None):
+        raise AttributeError("The data has annotations, needs a meas_date argument.")
+    for k,df in df_dict.items():
+        #if has_dt_annot:
+        #    starts.extend([x.to_datetime64() for x in df[start_col].apply(lambda x: (datetime.timedelta(seconds=x) + meas_date)).tolist()])
+        #else: 
+        starts.extend(df[start_col])
+        durs.extend(df[stop_col] - df[start_col])
+        keys.extend([k]*df.shape[0])
+    annot = mne.Annotations(onset= starts, duration=durs, description=keys, orig_time=meas_date)
+    if not has_annot or replace_annot:
+        data.set_annotations(annot)
+    else:
+        data.set_annotations(data.annotations.copy() + annot)
+    
+
 #%% ---------- Loading
 def _load_eeg(eeg_path:str, date:str, group:str, preload_eeg:bool=True, **kwargs):
     """Reading original files
@@ -95,7 +129,7 @@ def _read_participant_eeg(date:int, group:str, part:int,
     """Read split files
     """
     eeg_name = f"bkt-{date}-{group}-p{part}-raw.fif"
-    data = mne.io.read_raw_fif(os.path.join(eeg_folder, eeg_name), preload=True) 
+    data = mne.io.read_raw_fif(os.path.join(os.path.abspath(eeg_folder), eeg_name), preload=True) 
     # channels already dropped / cropped / marked as bad earlier
     data.set_montage(montage)
     id = group[(part*2)+0: (part*2)+2] # check if [0,1] or [1,2]
@@ -177,3 +211,79 @@ def eeg_split_files(data, part_names:list, data_path:str=None,
             # naming conventions, should finish with raw.fif or _eeg.fif.gz or ...
     else:
         return files
+    
+
+#%% Filter etc data
+def add_ref(data, select='mastoids'):
+    """Adding physical reference(s) as reference to the data (must be one of ['all','mastoids',1,2,3])
+    This function does not add computed (avg, etc) references 
+    """
+    ok_list = ['all','mastoids',1,2,3]
+    if select not in ok_list:
+        raise ValueError(f"Adding physical references: must be one of {ok_list}, not {select}")
+    ref_names = [x for x in data.ch_names if 'EXG' in x]
+    if select == 'mastoids':
+        ref_names = ref_names[1:]
+    elif isinstance(select, int):
+        ref_names = [ref_names[select-1]]
+    data.set_eeg_reference(ref_channels=ref_names)
+
+def _pre_ica_filter(data, hp:int=1, lp:int=100, notch:int=50):
+    """Documentation: https://mne.tools/dev/auto_tutorials/preprocessing/30_filtering_resampling.html
+    """
+    data.notch_filter(freqs=[notch], picks=['eeg'])
+    data.filter(l_freq=hp, h_freq=lp)
+
+### Bridged electrodes
+# From MNE tutorial https://mne.tools/stable/auto_examples/preprocessing/eeg_bridging.html
+def plot_electrical_distance_matrix_os(bridged_idx, ed_matrix, cfile:str=None):
+    # Electrical Distance Matrix
+    plt.clf()
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
+    if cfile is not None:
+        fig.suptitle(f'{cfile.split("/")[-1]} Electrical Distance Matrix')
+
+    # take median across epochs, only use upper triangular, lower is NaNs
+    ed_plot = np.zeros(ed_matrix.shape[1:]) * np.nan
+    triu_idx = np.triu_indices(ed_plot.shape[0], 1)
+    for idx0, idx1 in np.array(triu_idx).T:
+        ed_plot[idx0, idx1] = np.nanmedian(ed_matrix[:, idx0, idx1])
+
+    # plot full distribution color range
+    im1 = ax1.imshow(ed_plot, aspect='auto')
+    cax1 = fig.colorbar(im1, ax=ax1)
+    cax1.set_label(r'Electrical Distance ($\mu$$V^2$)')
+
+    # plot zoomed in colors
+    im2 = ax2.imshow(ed_plot, aspect='auto', vmax=5)
+    cax2 = fig.colorbar(im2, ax=ax2)
+    cax2.set_label(r'Electrical Distance ($\mu$$V^2$)')
+    for ax in (ax1, ax2):
+        ax.set_xlabel('Channel Index')
+        ax.set_ylabel('Channel Index')
+
+    fig.tight_layout()
+    plt.show()
+
+def plot_distrib_edistances(ed_matrix, cfile:str=None):
+    # Distribution of Electrical Distances
+    plt.clf()
+    fig, ax = plt.subplots(figsize=(5, 5))
+    if cfile is not None:
+        fig.suptitle(f'{cfile.split("/")[-1]} Electrical Distance Matrix Distribution')
+    ax.hist(ed_matrix[~np.isnan(ed_matrix)], bins=np.linspace(0, 500, 51))
+    ax.set_xlabel(r'Electrical Distance ($\mu$$V^2$)')
+    ax.set_ylabel('Count (channel pairs for all epochs)')
+    plt.show()
+
+def list_bridged(data:dict, return_as_dict:bool=False):
+    """data = {'data': raw.info, 'idx': bridged_idx, 'mat': ed_matrix}
+    """
+    # data = data['bkt-221128-LBRA-p1-raw.fif']
+    bidx = pd.DataFrame(data['idx'], columns=['source','target'])
+    bidx['source-name'] = bidx.source.apply(lambda x: data['data'].ch_names[x])
+    bidx['target-name'] = bidx.target.apply(lambda x: data['data'].ch_names[x])
+    bidx = bidx.groupby(['target-name'])['source-name'].agg(list)
+    if return_as_dict:
+        return bidx.to_dict()
+    return bidx

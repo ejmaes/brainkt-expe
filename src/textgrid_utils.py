@@ -11,7 +11,10 @@ import textgrid
 import typing
 import pandas as pd
 import os, sys
+import datetime
 from tqdm import tqdm
+import numpy as np
+from typing import Union
 
 # Removing most of SPPAS output
 import logging
@@ -151,3 +154,41 @@ def merge_files(d:dict, outfile_path:str) -> None:
         for (old_tiername, new_tiername) in d[filename]:
             # TODO
             pass
+
+
+#%% ---------- TO SRT (for video) -----------
+def tier_to_srt(tier_df:pd.DataFrame, file_name:str) -> None:
+    """Create srt file from df"""
+    with open(file_name,'w') as f:
+        for idx, row in tier_df.iterrows():
+            #try:
+            if row.start == 0:
+                start = "0:00:00,000" # issues since not using strftime
+            else: 
+                start = str(datetime.timedelta(seconds=np.round(row.start,2)))[:-3].replace('.',',')
+            stop = str(datetime.timedelta(seconds=np.round(row.stop,2)))[:-3].replace('.',',')
+            f.write(f"{idx}\n0{start} --> 0{stop}\n{row.text.strip()}\n\n")
+            #f.write(f"0{start} --> 0{stop}\n{row.text.strip()}\n")
+            #except:
+            #    print('Skipping row', row.start, row.stop)
+
+def tiers_to_srt(file_name:str, tiers:Union[str,list,dict], output_excel:bool=False):
+    """From TextGrid file, read interesting tiers, creates DataFrame (all tiers merged) then calling tier_to_srt 
+    """
+    out_file = os.path.splitext(file_name)[0]+'.srt'
+    if isinstance(tiers, str):
+        df = read_tier(file_name, tiers)
+        tier_to_srt(df, out_file)
+    else:
+        if isinstance(tiers, list):
+            tiers = {t:t for t in tiers}
+        df = []
+        for tn, tier, in tiers.items():
+            tmp = read_tier(file_name, tier)
+            #tmp['speaker'] = tn
+            tmp['text'] = tmp.text.apply(lambda x: f"[{tn}] {x}")
+            df.append(tmp)
+        df = pd.concat(df, axis=0).sort_values(by=['start','stop']).reset_index(drop=True)
+        #tier_to_srt(df, out_file)
+    if output_excel:
+        df.to_excel(os.path.splitext(file_name)[0]+'.xlsx', index=False)
